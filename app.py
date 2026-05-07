@@ -406,6 +406,7 @@ if calcular:
         st.divider()
 
         # --- NOVA SEÇÃO: PASSO 5 - SIMULAÇÃO ---
+        # --- NOVA SEÇÃO: PASSO 5 - SIMULAÇÃO ---
         st.header("Passo 5: Simulação da Resposta no Tempo")
         st.markdown("Verificação do comportamento dinâmico (Ajuste Fino)")
         
@@ -417,17 +418,34 @@ if calcular:
             sys_MF_original = ct.feedback(sys_G, sys_H)
             sys_MF_controlado = ct.feedback(sys_Gc * sys_G, sys_H)
 
-            info = ct.step_info(sys_MF_controlado)
-            ts_real = info['SettlingTime']
-            
-            t_max = ts_real * 2 if not np.isnan(ts_real) else 10.0
+            # Tenta usar a biblioteca, mas protege contra sistemas instáveis ou lentos
+            try:
+                info = ct.step_info(sys_MF_controlado)
+                ts_real = info['SettlingTime']
+                mp_real = info['Overshoot']
+                tp_real = info['PeakTime']
+            except Exception:
+                ts_real = math.nan
+                mp_real = math.nan
+                tp_real = math.nan
+
+            # Se falhou em achar o ts, usa 15 segundos como padrão para o gráfico não quebrar
+            t_max = ts_real * 2 if not math.isnan(ts_real) and ts_real > 0 else 15.0
             t_sim = np.linspace(0, t_max, 1000)
 
             t_orig, y_orig = ct.step_response(sys_MF_original, T=t_sim)
             t_cont, y_cont = ct.step_response(sys_MF_controlado, T=t_sim)
 
-            mp_real = info['Overshoot']
-            tp_real = info['PeakTime']
+            # Cálculo manual de segurança se a biblioteca falhou em achar o Mp
+            if math.isnan(mp_real) or math.isnan(tp_real):
+                if len(y_cont) > 0:
+                    ss_val = y_cont[-1] # Pega o valor estabilizado no final
+                    pico_idx = np.argmax(y_cont)
+                    tp_real = t_cont[pico_idx]
+                    if abs(ss_val) > 0.001:
+                        mp_real = max(0.0, (y_cont[pico_idx] - ss_val) / abs(ss_val) * 100)
+                    else:
+                        mp_real = 0.0
 
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(t_orig, y_orig, 'r-', linewidth=2, label="Sem Controlador")
@@ -438,11 +456,13 @@ if calcular:
             ax.axhline(1 + erro_ts, color='c', linestyle='--', linewidth=1, alpha=0.7)
             ax.axhline(1 - erro_ts, color='c', linestyle='--', linewidth=1, alpha=0.7)
             
-            ax.plot(tp_real, 1 + mp_real/100, 'ro')
-            ax.text(tp_real + 0.1, 1 + mp_real/100, f"$M_P$ = {mp_real:.2f}%", color='blue', fontsize=12)
+            if not math.isnan(tp_real) and not math.isnan(mp_real):
+                ax.plot(tp_real, 1 + mp_real/100, 'ro')
+                ax.text(tp_real + 0.1, 1 + mp_real/100, f"$M_P$ = {mp_real:.2f}%", color='blue', fontsize=12)
             
-            ax.axvline(ts_real, color='r', linestyle='--', linewidth=1, alpha=0.7)
-            ax.text(ts_real + 0.1, 0.8, f"$t_s$ = {ts_real:.2f}s", color='black', fontsize=12)
+            if not math.isnan(ts_real):
+                ax.axvline(ts_real, color='r', linestyle='--', linewidth=1, alpha=0.7)
+                ax.text(ts_real + 0.1, 0.8, f"$t_s$ = {ts_real:.2f}s", color='black', fontsize=12)
 
             ax.set_title("Resposta ao Degrau", fontsize=14)
             ax.set_xlabel("Tempo", fontsize=12)
@@ -452,7 +472,10 @@ if calcular:
             
             st.pyplot(fig)
             
-            st.info(f"**Desempenho Real (Simulado):** $M_P$ = {mp_real:.2f}%, $t_s$ = {ts_real:.2f}s.")
+            if not math.isnan(ts_real):
+                st.info(f"**Desempenho Real (Simulado):** $M_P$ = {mp_real:.2f}%, $t_s$ = {ts_real:.2f}s.")
+            else:
+                st.warning(f"**Aviso:** O sistema demorou muito para estabilizar ou possui um erro de regime estacionário alto. O $M_P$ aparente é de {mp_real:.2f}%. O método do Lugar das Raízes pode exigir a adição de um compensador de atraso (PI) para zerar o erro.")
 
     except Exception as e:
         st.error("Erro ao processar as equações. Certifique-se de usar a sintaxe correta do Python (ex: `s**2` para potência, `*` para multiplicação).")
