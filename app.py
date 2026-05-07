@@ -202,11 +202,11 @@ if calcular:
                 K_planta_sign = 1.0
                 
             if K_planta_sign < 0:
-                ang_GH_prof = sum_p-sum_z  + 180.0
+                ang_GH_prof = sum_z - sum_p + 180.0
                 st.latex(rf"\phi = \sum \theta_z - \sum \theta_p + 180^\circ \text{{ (sinal do ganho)}} = {ang_GH_prof:.2f}^\circ")
             else:
-                ang_GH_prof = sum_p-sum_z
-                st.latex(rf"\phi = \sum \theta_z - \sum \theta_p = {sum_z:.2f}^\circ - {sum_p:.2f}^\circ = {ang_GH_prof:.2f}^\circ")
+                ang_GH_prof = sum_z - sum_p
+                st.latex(rf"\phi = \sum \theta_z - \sum \theta_p = {sum_p:.2f}^\circ - {sum_z:.2f}^\circ = {ang_GH_prof:.2f}^\circ")
             
         except Exception:
             # Fallback seguro caso a extração de raízes não funcione (as variáveis continuam vazias)
