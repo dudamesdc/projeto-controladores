@@ -160,13 +160,18 @@ if calcular:
         st.header("Passo 2: Critério do Ângulo (Soma das Fases = 180°)")
         GH_expr = G_expr * H_expr
         
-        # Extração das raízes para exibir o cálculo detalhado dos ângulos
         GH_simp = sp.cancel(sp.simplify(GH_expr))
         num, den = sp.fraction(GH_simp)
+        
+        # Variáveis de segurança para evitar o erro "NameError"
+        zeros_planta = []
+        poles_planta = []
+        sucesso_raizes = False
         
         try:
             zeros_planta = sp.nroots(num)
             poles_planta = sp.nroots(den)
+            sucesso_raizes = True
             
             st.markdown("**Raízes da Planta $G(s)H(s)$ encontradas:**")
             str_poles = ", ".join([format_complex(complex(p)) for p in poles_planta]) if poles_planta else "Nenhum"
@@ -179,7 +184,6 @@ if calcular:
             sum_p = 0.0
             sum_z = 0.0
             
-            # Segue a notação do caderno do professor
             for i, z_val in enumerate(zeros_planta):
                 z_cplx = complex(z_val)
                 ang = np.degrees(np.angle(s_d - z_cplx))
@@ -192,7 +196,6 @@ if calcular:
                 sum_p += ang
                 st.latex(rf"\theta_{{p{i+1}}} = \angle(s_d - ({format_complex(p_cplx)})) = {ang:.2f}^\circ")
 
-            # Verifica se o ganho de malha aberta é naturalmente negativo (raro, mas garante precisão)
             try:
                 K_planta_sign = float(sp.Poly(num, s).LC() / sp.Poly(den, s).LC())
             except:
@@ -206,10 +209,10 @@ if calcular:
                 st.latex(rf"\phi = \sum \theta_z - \sum \theta_p = {sum_z:.2f}^\circ - {sum_p:.2f}^\circ = {ang_GH_prof:.2f}^\circ")
             
         except Exception:
-            # Fallback seguro caso a extração de raízes não funcione
+            # Fallback seguro caso a extração de raízes não funcione (as variáveis continuam vazias)
             GH_val_pure = complex(GH_expr.subs(s, s_d).evalf())
             ang_GH_prof = np.degrees(np.angle(GH_val_pure))
-            st.write(rf"Ângulo da planta avaliado $\phi = \sum \theta_z - \sum \theta_p = {ang_GH_prof:.2f}^\circ$")
+            st.write(rf"Ângulo da planta avaliado diretamente $\phi = \sum \theta_z - \sum \theta_p = {ang_GH_prof:.2f}^\circ$")
 
         st.markdown("**Cálculo do Controlador:**")
         
@@ -217,7 +220,6 @@ if calcular:
         b_val = None
         Gc_estrutura = None
         
-        # Variável para formatar o display do denominador na tangente
         sign_re = "+" if s_d.real >= 0 else "-"
         
         if ctrl_type == "PD":
@@ -312,10 +314,11 @@ if calcular:
         st.divider()
 
         st.header("Passo 3: Critério do Módulo (Encontrar Ganho)")
-        st.markdown("Pela fórmula da sua tabela, o ganho $K_c$ compensa as distâncias no ponto $s_d$:")
-        st.latex(r"K_{c} = \frac{1}{|K_{planta}|} \cdot \frac{\prod d_p}{\prod d_z}")
         
-        if ctrl_type != "Construtor Livre (Personalizado)":
+        # Só executa o detalhamento passo-a-passo se a extração de raízes tiver sido um sucesso
+        if ctrl_type != "Construtor Livre (Personalizado)" and sucesso_raizes:
+            st.markdown("Pela fórmula da sua tabela, o ganho $K_c$ compensa as distâncias no ponto $s_d$:")
+            st.latex(r"K_{c} = \frac{1}{|K_{planta}|} \cdot \frac{\prod d_p}{\prod d_z}")
             try:
                 num_poly = sp.Poly(num, s)
                 den_poly = sp.Poly(den, s)
@@ -371,13 +374,14 @@ if calcular:
             st.latex(rf"K_c = {Kc_val:.4f}")
             
         else:
+            # Caso "Genérico" ou se o SymPy não conseguir fatorar (Fallback blindado)
+            st.markdown("Cálculo pelas magnitudes (avaliando diretamente no ponto $s_d$):")
             mag_Gc_est = abs(complex(Gc_estrutura.subs(s, s_d).evalf()))
             mag_GH = abs(complex(GH_expr.subs(s, s_d).evalf()))
             st.latex(rf"|G_{{c,estrut}}(s_d)| = {mag_Gc_est:.4f} \quad \text{{e}} \quad |G(s_d)H(s_d)| = {mag_GH:.4f}")
             Kc_val = 1.0 / (mag_Gc_est * mag_GH)
             st.latex(rf"K_c = \frac{{1}}{{{mag_Gc_est:.4f} \cdot {mag_GH:.4f}}} = {Kc_val:.4f}")
         
-        # Estrutura matemática real para simulação e display bonitinho
         Gc_final = Kc_val * Gc_estrutura 
         Gc_display = sp.Mul(round(Kc_val, 4), sp.N(Gc_estrutura, 4), evaluate=False)
         
