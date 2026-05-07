@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Calculadora Universal - Sistemas de Controle", layout="wide")
 st.title("Calculadora de Projeto de Controladores")
 
-
 # --- FUNÇÕES MATEMÁTICAS E AUXILIARES ---
 def calc_zeta(mp_percent):
     """Fórmula do Anexo 1 para fator de amortecimento"""
@@ -165,93 +164,113 @@ if calcular:
         GH_simp = sp.cancel(sp.simplify(GH_expr))
         num, den = sp.fraction(GH_simp)
         
-        ang_GH = 0.0
         try:
             zeros_planta = sp.nroots(num)
             poles_planta = sp.nroots(den)
             
+            st.markdown("**Raízes da Planta $G(s)H(s)$ encontradas:**")
+            str_poles = ", ".join([format_complex(complex(p)) for p in poles_planta]) if poles_planta else "Nenhum"
+            str_zeros = ", ".join([format_complex(complex(z)) for z in zeros_planta]) if zeros_planta else "Nenhum"
+            st.write(f"- **Pólos ($p$):** {str_poles}")
+            st.write(f"- **Zeros ($z$):** {str_zeros}")
+            
             st.markdown("**Contribuição angular da planta e realimentação no ponto $s_d$:**")
             
-            # Calculando o ângulo da constante de ganho estático (se houver sinal negativo)
-            # Geralmente é 0 para sistemas estáveis, mas é bom garantir matematicamente.
-            GH_val_pure = complex(GH_expr.subs(s, s_d).evalf())
+            sum_p = 0.0
+            sum_z = 0.0
             
-            for i, z_val in enumerate(zeros_planta):
-                z_cplx = complex(z_val)
-                ang = np.degrees(np.angle(s_d - z_cplx))
-                ang_GH += ang
-                st.latex(rf"\theta_{{z{i+1}}} = \angle(s_d - ({format_complex(z_cplx)})) = {ang:.2f}^\circ")
-                
             for i, p_val in enumerate(poles_planta):
                 p_cplx = complex(p_val)
                 ang = np.degrees(np.angle(s_d - p_cplx))
-                ang_GH -= ang
+                sum_p += ang
                 st.latex(rf"\theta_{{p{i+1}}} = \angle(s_d - ({format_complex(p_cplx)})) = {ang:.2f}^\circ")
+
+            for i, z_val in enumerate(zeros_planta):
+                z_cplx = complex(z_val)
+                ang = np.degrees(np.angle(s_d - z_cplx))
+                sum_z += ang
+                st.latex(rf"\phi_{{z{i+1}}} = \angle(s_d - ({format_complex(z_cplx)})) = {ang:.2f}^\circ")
                 
-            # Correção final pelo valor absoluto substituído (para captar o ganho K natural da planta)
-            ang_GH = np.degrees(np.angle(GH_val_pure))
-            st.latex(rf"\phi = \sum \theta_z - \sum \theta_p = {ang_GH:.2f}^\circ")
+            ang_GH_prof = sum_p - sum_z
+            st.markdown("Seguindo a convenção da sua tabela (Soma dos ângulos dos pólos - Soma dos ângulos dos zeros):")
+            st.latex(rf"\left( \sum \theta_p - \sum \phi_z \right)_{{planta}} = {sum_p:.2f}^\circ - {sum_z:.2f}^\circ = {ang_GH_prof:.2f}^\circ")
             
         except Exception:
-            # Fallback seguro caso a extração de raízes não funcione para funções não polinomiais
+            # Fallback seguro caso a extração de raízes não funcione para funções complexas
             GH_val_pure = complex(GH_expr.subs(s, s_d).evalf())
-            ang_GH = np.degrees(np.angle(GH_val_pure))
-            st.write(rf"Ângulo total da malha aberta não compensada $\phi = \angle G(s_d)H(s_d) = {ang_GH:.2f}^\circ$")
+            ang_GH_prof = -np.degrees(np.angle(GH_val_pure)) # Invertendo o sinal do python para bater com polos - zeros
+            st.write(rf"Ângulo da planta avaliado $\left( \sum \theta_p - \sum \phi_z \right) = {ang_GH_prof:.2f}^\circ$")
 
-        ang_needed = 180 - ang_GH
-        while ang_needed <= 0: ang_needed += 360
-        while ang_needed > 180: ang_needed -= 360
-        
         st.markdown("**Cálculo do Controlador:**")
-        st.write(f"Para satisfazer o critério, o controlador precisa fornecer $\\theta_c = {ang_needed:.2f}^\\circ$")
+        st.write("Para satisfazer o critério, a fase total (incluindo o controlador) deve igualar a $180^\circ$.")
         
         zc_val = None
+        b_val = None
         Gc_estrutura = None
         
         if ctrl_type == "PD":
-            st.markdown("Estrutura do PD: $G_c(s) = K_c(s+z_c)$")
-            zc_val = abs(s_d.imag) / math.tan(math.radians(ang_needed)) - s_d.real
-            st.latex(rf"\tan({ang_needed:.2f}^\circ) = \frac{{\omega_d}}{{z_c - \sigma}} = \frac{{{abs(s_d.imag):.4f}}}{{z_c - ({s_d.real:.4f})}}")
-            st.latex(rf"z_c = {zc_val:.4f} \implies G_{{c,estrut}}(s) = s + {zc_val:.4f}")
+            st.markdown("Estrutura do PD: $G_c(s) = K_c(s+z_c)$ (Adiciona 1 zero $\phi_{z,ctrl}$)")
+            st.latex(r"\sum \theta_{p} - \left(\sum \phi_{z} + \phi_{z,ctrl}\right) = 180^\circ")
+            
+            ang_c_needed = ang_GH_prof - 180
+            while ang_c_needed <= 0: ang_c_needed += 360
+            while ang_c_needed > 180: ang_c_needed -= 360
+            st.latex(rf"\phi_{{z,ctrl}} = {ang_GH_prof:.2f}^\circ - 180^\circ = {ang_c_needed:.2f}^\circ")
+            
+            zc_val = abs(s_d.imag) / math.tan(math.radians(ang_c_needed)) - s_d.real
+            st.latex(rf"\tan({ang_c_needed:.2f}^\circ) = \frac{{\omega_d}}{{z_c - \sigma}} \implies z_c = {zc_val:.4f}")
             Gc_estrutura = s + zc_val
 
         elif ctrl_type == "PI":
-            st.markdown("Estrutura do PI: $G_c(s) = K_c\frac{(s+z_c)}{s}$")
+            st.markdown(r"Estrutura do PI: $G_c(s) = K_c\frac{(s+z_c)}{s}$ (Adiciona 1 zero $\phi_{z,ctrl}$ e 1 pólo $\theta_{p,ctrl}$ em s=0)")
             ang_polo_origem = np.degrees(np.angle(s_d))
-            ang_zero_pi = ang_needed + ang_polo_origem
-            while ang_zero_pi <= 0: ang_zero_pi += 360
-            while ang_zero_pi > 180: ang_zero_pi -= 360
-            st.write(f"O pólo na origem em $s=0$ contribui com $\\angle s_d = {ang_polo_origem:.2f}^\\circ$. Logo, o zero deve fornecer $\\theta_z = {ang_zero_pi:.2f}^\\circ$")
-            zc_val = abs(s_d.imag) / math.tan(math.radians(ang_zero_pi)) - s_d.real
-            st.latex(rf"\tan({ang_zero_pi:.2f}^\circ) = \frac{{{abs(s_d.imag):.4f}}}{{z_c - ({s_d.real:.4f})}} \implies z_c = {zc_val:.4f}")
+            st.latex(rf"\theta_{{p,ctrl}} = \angle(s_d - 0) = {ang_polo_origem:.2f}^\circ")
+            st.latex(r"\left(\sum \theta_{p} + \theta_{p,ctrl}\right) - \left(\sum \phi_{z} + \phi_{z,ctrl}\right) = 180^\circ")
+            
+            ang_c_needed = ang_GH_prof + ang_polo_origem - 180
+            while ang_c_needed <= 0: ang_c_needed += 360
+            while ang_c_needed > 180: ang_c_needed -= 360
+            st.latex(rf"\phi_{{z,ctrl}} = {ang_c_needed:.2f}^\circ")
+            
+            zc_val = abs(s_d.imag) / math.tan(math.radians(ang_c_needed)) - s_d.real
+            st.latex(rf"\tan({ang_c_needed:.2f}^\circ) = \frac{{\omega_d}}{{z_c - \sigma}} \implies z_c = {zc_val:.4f}")
             Gc_estrutura = (s + zc_val) / s
 
         elif ctrl_type == "PID (Zeros iguais)":
-            st.markdown(r"Estrutura do PID: $G_c(s) = K_c\frac{(s+z_c)^2}{s}$")
+            st.markdown(r"Estrutura do PID: $G_c(s) = K_c\frac{(s+z_c)^2}{s}$ (Adiciona 2 zeros iguais $\phi_{z,ctrl}$ e 1 pólo $\theta_{p,ctrl}$)")
             ang_polo_origem = np.degrees(np.angle(s_d))
-            ang_zero_total = ang_needed + ang_polo_origem
-            ang_cada_zero = ang_zero_total / 2.0
-            while ang_cada_zero <= 0: ang_cada_zero += 180
-            st.write(f"Pólo na origem: $\\angle s_d = {ang_polo_origem:.2f}^\\circ$. Contribuição exigida de CADA zero do PID: $\\theta_z = {ang_cada_zero:.2f}^\\circ$")
-            zc_val = abs(s_d.imag) / math.tan(math.radians(ang_cada_zero)) - s_d.real
-            st.latex(rf"\tan({ang_cada_zero:.2f}^\circ) = \frac{{{abs(s_d.imag):.4f}}}{{z_c - ({s_d.real:.4f})}} \implies z_c = {zc_val:.4f}")
+            st.latex(rf"\theta_{{p,ctrl}} = \angle(s_d - 0) = {ang_polo_origem:.2f}^\circ")
+            st.latex(r"\left(\sum \theta_{p} + \theta_{p,ctrl}\right) - \left(\sum \phi_{z} + 2\phi_{z,ctrl}\right) = 180^\circ")
+            
+            ang_zeros_total = ang_GH_prof + ang_polo_origem - 180
+            while ang_zeros_total <= 0: ang_zeros_total += 360
+            while ang_zeros_total > 360: ang_zeros_total -= 360
+            
+            ang_c_needed = ang_zeros_total / 2.0
+            st.latex(rf"2\phi_{{z,ctrl}} = {ang_zeros_total:.2f}^\circ \implies \phi_{{z,ctrl}} = {ang_c_needed:.2f}^\circ")
+            
+            zc_val = abs(s_d.imag) / math.tan(math.radians(ang_c_needed)) - s_d.real
+            st.latex(rf"\tan({ang_c_needed:.2f}^\circ) = \frac{{\omega_d}}{{z_c - \sigma}} \implies z_c = {zc_val:.4f}")
             Gc_estrutura = ((s + zc_val)**2) / s
 
         elif ctrl_type == "Compensador ( a / (s+b) )":
-            st.markdown(r"Estrutura do Compensador: $G_c(s) = \frac{a}{s+b}$")
-            ang_polo = ang_GH - 180
-            while ang_polo <= 0: ang_polo += 360
-            while ang_polo > 180: ang_polo -= 360
-            b_val = abs(s_d.imag) / math.tan(math.radians(ang_polo)) - s_d.real
-            st.write(f"Neste caso, o compensador tem um pólo ($-b$). Ele deve subtrair fase para fechar $180^\circ$. $\\angle(s_d+b) = {ang_polo:.2f}^\circ$")
-            st.latex(rf"\tan({ang_polo:.2f}^\circ) = \frac{{{abs(s_d.imag):.4f}}}{{b - ({s_d.real:.4f})}} \implies b = {b_val:.4f}")
+            st.markdown(r"Estrutura do Compensador: $G_c(s) = \frac{a}{s+b}$ (Adiciona 1 pólo $\theta_{p,ctrl}$)")
+            st.latex(r"\left(\sum \theta_{p} + \theta_{p,ctrl}\right) - \sum \phi_{z} = 180^\circ")
+            
+            ang_c_needed = 180 - ang_GH_prof
+            while ang_c_needed <= 0: ang_c_needed += 360
+            while ang_c_needed > 180: ang_c_needed -= 360
+            
+            st.latex(rf"\theta_{{p,ctrl}} = 180^\circ - {ang_GH_prof:.2f}^\circ = {ang_c_needed:.2f}^\circ")
+            b_val = abs(s_d.imag) / math.tan(math.radians(ang_c_needed)) - s_d.real
+            st.latex(rf"\tan({ang_c_needed:.2f}^\circ) = \frac{{\omega_d}}{{b - \sigma}} \implies b = {b_val:.4f}")
             Gc_estrutura = 1 / (s + b_val)
 
         elif ctrl_type == "Construtor Livre (Personalizado)":
             var_sym = sp.Symbol(var_custom)
             Gc_expr_custom = sp.sympify(Gc_custom_str)
             st.markdown(f"**Estrutura do Compensador:** $G_{{c,estrut}}(s) =$ " + f"${sp.latex(Gc_expr_custom)}$")
-            target_rad = math.radians(ang_needed)
+            target_rad = math.radians(ang_GH_prof - 180) # Ajuste pela lógica invertida
             target_vec = complex(math.cos(target_rad), math.sin(target_rad))
             
             def eval_angle_diff(val):
@@ -277,34 +296,73 @@ if calcular:
         st.divider()
 
         st.header("Passo 3: Critério do Módulo (Encontrar Ganho)")
-        st.markdown("O módulo da função de malha aberta avaliada em $s_d$ deve ser igual a 1.")
-        st.latex(r"|G_c(s_d)G(s_d)H(s_d)| = 1 \implies K_c = \frac{1}{|G_{c,estrut}(s_d)| \cdot |G(s_d)H(s_d)|}")
+        st.markdown("Pela fórmula da sua tabela (Anexo 1), avaliamos as distâncias no ponto $s_d$:")
+        st.latex(r"K_{total} = \frac{\prod_{j=1}^{n_p} |s_d + p_j|}{\prod_{k=1}^{n_z} |s_d + z_k|}")
         
-        try:
-            st.markdown("**Distâncias (Módulos) calculadas do ponto $s_d$ até as raízes da planta:**")
-            for i, z_val in enumerate(zeros_planta):
-                dist = abs(s_d - complex(z_val))
-                st.latex(rf"|s_d - z_{i+1}| = |s_d - ({format_complex(complex(z_val))})| = {dist:.4f}")
+        if ctrl_type != "Construtor Livre (Personalizado)":
+            try:
+                num_poly = sp.Poly(num, s)
+                den_poly = sp.Poly(den, s)
+                K_planta = abs(float(num_poly.LC() / den_poly.LC()))
+            except:
+                K_planta = 1.0
+
+            prod_p = 1.0
+            prod_z = 1.0
+
+            st.markdown("**1. Produto das distâncias aos Pólos ($|s_d - p|$):**")
             for i, p_val in enumerate(poles_planta):
                 dist = abs(s_d - complex(p_val))
-                st.latex(rf"|s_d - p_{i+1}| = |s_d - ({format_complex(complex(p_val))})| = {dist:.4f}")
-        except Exception:
-            pass # Ignora caso a planta seja não-polinomial
+                prod_p *= dist
+                st.latex(rf"d_{{p{i+1}}} = |s_d - ({format_complex(complex(p_val))})| = {dist:.4f}")
+
+            if ctrl_type == "PI" or ctrl_type == "PID (Zeros iguais)":
+                dist = abs(s_d)
+                prod_p *= dist
+                st.latex(rf"d_{{p,ctrl}} = |s_d - 0| = {dist:.4f}")
+            elif ctrl_type == "Compensador ( a / (s+b) )" and b_val is not None:
+                dist = abs(s_d + b_val)
+                prod_p *= dist
+                st.latex(rf"d_{{p,ctrl}} = |s_d - ({-b_val:.4f})| = {dist:.4f}")
+
+            st.markdown("**2. Produto das distâncias aos Zeros ($|s_d - z|$):**")
+            if len(zeros_planta) == 0 and ctrl_type == "Compensador ( a / (s+b) )":
+                st.write("Sem zeros no sistema geral. Denominador = 1.")
+
+            for i, z_val in enumerate(zeros_planta):
+                dist = abs(s_d - complex(z_val))
+                prod_z *= dist
+                st.latex(rf"d_{{z{i+1}}} = |s_d - ({format_complex(complex(z_val))})| = {dist:.4f}")
+
+            if ctrl_type == "PD" or ctrl_type == "PI":
+                if zc_val is not None:
+                    dist = abs(s_d + zc_val)
+                    prod_z *= dist
+                    st.latex(rf"d_{{z,ctrl}} = |s_d - ({-zc_val:.4f})| = {dist:.4f}")
+            elif ctrl_type == "PID (Zeros iguais)":
+                if zc_val is not None:
+                    dist = abs(s_d + zc_val)
+                    prod_z *= (dist**2)
+                    st.latex(rf"d_{{z,ctrl}} = |s_d - ({-zc_val:.4f})|^2 = {(dist**2):.4f}")
+
+            K_total = prod_p / prod_z
+            st.latex(rf"K_{{total}} = \frac{{{prod_p:.4f}}}{{{prod_z:.4f}}} = {K_total:.4f}")
+
+            st.markdown(f"Como a planta possui um ganho intrínseco de $K_{{planta}} = {K_planta}$, o ganho livre $K_c$ é isolado:")
+            Kc_val = K_total / K_planta
+            st.latex(rf"K_c = \frac{{K_{{total}}}}{{K_{{planta}}}} = \frac{{{K_total:.4f}}}{{{K_planta:.4f}}} = {Kc_val:.4f}")
+            
+        else:
+            # Caso genérico para o construtor livre
+            st.markdown("Cálculo genérico das magnitudes do construtor livre:")
+            mag_Gc_est = abs(complex(Gc_estrutura.subs(s, s_d).evalf()))
+            mag_GH = abs(complex(GH_expr.subs(s, s_d).evalf()))
+            st.latex(rf"|G_{{c,estrut}}(s_d)| = {mag_Gc_est:.4f} \quad \text{{e}} \quad |G(s_d)H(s_d)| = {mag_GH:.4f}")
+            Kc_val = 1.0 / (mag_Gc_est * mag_GH)
+            st.latex(rf"K_c = \frac{{1}}{{{mag_Gc_est:.4f} \cdot {mag_GH:.4f}}} = {Kc_val:.4f}")
         
-        mag_Gc_est = abs(complex(Gc_estrutura.subs(s, s_d).evalf()))
-        mag_GH = abs(complex(GH_expr.subs(s, s_d).evalf()))
-        
-        st.write("Substituindo os módulos parciais:")
-        st.latex(rf"|G_{{c,estrut}}(s_d)| = {mag_Gc_est:.4f}")
-        st.latex(rf"|G(s_d)H(s_d)| = {mag_GH:.4f}")
-        
-        Kc_val = 1.0 / (mag_Gc_est * mag_GH)
-        st.latex(rf"K_c = \frac{{1}}{{{mag_Gc_est:.4f} \cdot {mag_GH:.4f}}} = {Kc_val:.4f}")
-        
-        # Manter a estrutura real para os cálculos matemáticos do Passo 4 e 5
+        # Manter a estrutura real para os cálculos matemáticos
         Gc_final = Kc_val * Gc_estrutura 
-        
-        # Criação de um espelho visual "Proibindo" o chuveirinho para ficar visualmente correto na tela
         Gc_display = sp.Mul(round(Kc_val, 4), sp.N(Gc_estrutura, 4), evaluate=False)
         
         st.success(f"**Função de Transferência do Controlador Contínuo:**")
