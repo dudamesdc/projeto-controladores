@@ -169,8 +169,8 @@ if calcular:
         sucesso_raizes = False
         
         try:
-            zeros_planta = sp.nroots(num)
-            poles_planta = sp.nroots(den)
+            zeros_planta = sp.nroots(num) if num.has(s) else []
+            poles_planta = sp.nroots(den) if den.has(s) else []
             sucesso_raizes = True
             
             st.markdown("**Raízes da Planta $G(s)H(s)$ encontradas:**")
